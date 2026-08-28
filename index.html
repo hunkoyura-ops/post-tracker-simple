@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8" />
+<title>Трекінг результатів кампанії</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #222; }
+  h1 { font-size: 22px; } h2 { font-size: 18px; margin-top: 40px; border-top: 1px solid #eee; padding-top: 20px; }
+  form { display: grid; gap: 10px; max-width: 400px; }
+  label { font-size: 13px; color: #555; }
+  input, select { padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+  button { padding: 8px 16px; border: none; background: #111; color: #fff; border-radius: 6px; cursor: pointer; }
+  .card { border: 1px solid #eee; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+  .flag { color: #b45309; font-size: 13px; }
+  .thumb { max-width: 120px; border-radius: 6px; display: block; margin: 8px 0; }
+  pre { background: #fafafa; padding: 10px; border-radius: 6px; white-space: pre-wrap; }
+  .row { display: flex; gap: 8px; }
+</style>
+</head>
+<body>
+
+<h1>Трекінг результатів кампанії</h1>
+
+<h2>1. Завантажити скриншот</h2>
+<form id="uploadForm">
+  <label>Кампанія (campaignId)</label>
+  <input name="campaignId" required value="campaign-1" />
+  <label>Ім'я криейтора</label>
+  <input name="creatorName" required />
+  <label>ID криейтора</label>
+  <input name="creatorId" required />
+  <label>Підписники криейтора</label>
+  <input name="creatorFollowers" type="number" required />
+  <label>Платформа</label>
+  <select name="platform">
+    <option value="instagram">Instagram</option>
+    <option value="tiktok">TikTok</option>
+    <option value="youtube">YouTube</option>
+  </select>
+  <label>Дата публікації</label>
+  <input name="postedAt" type="date" required />
+  <label>Скриншот</label>
+  <input name="screenshot" type="file" accept="image/*" required />
+  <button type="submit">Завантажити і розпізнати</button>
+</form>
+<pre id="uploadResult"></pre>
+
+<h2>2. Черга на ручну перевірку</h2>
+<div class="row">
+  <input id="queueCampaignFilter" placeholder="campaignId (порожньо = всі)" />
+  <button onclick="loadQueue()">Оновити чергу</button>
+</div>
+<div id="queue"></div>
+
+<h2>3. Звіт по кампанії</h2>
+<div class="row">
+  <input id="reportCampaignId" placeholder="campaignId" value="campaign-1" />
+  <button onclick="loadReport()">Згенерувати звіт</button>
+</div>
+<div id="report"></div>
+
+<script>
+const uploadForm = document.getElementById("uploadForm");
+uploadForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(uploadForm);
+  document.getElementById("uploadResult").textContent = "Обробка...";
+  const res = await fetch("/api/submit", { method: "POST", body: fd });
+  const data = await res.json();
+  document.getElementById("uploadResult").textContent = JSON.stringify(data, null, 2);
+  loadQueue();
+});
+
+async function loadQueue() {
+  const campaignId = document.getElementById("queueCampaignFilter").value;
+  const res = await fetch("/api/queue" + (campaignId ? "?campaignId=" + encodeURIComponent(campaignId) : ""));
+  const items = await res.json();
+  const el = document.getElementById("queue");
+  el.innerHTML = "";
+  if (items.length === 0) { el.textContent = "Черга порожня."; return; }
+  for (const item of items) {
+    const div = document.createElement("div");
+    div.className = "card";
+    div.innerHTML = `
+      <strong>${item.creatorName}</strong> (${item.platform}) — ${item.postedAt}
+      <img class="thumb" src="${item.screenshotPath}" />
+      <div>views: ${item.views}, reach: ${item.reach}, likes: ${item.likes}, comments: ${item.comments}, shares: ${item.shares}, saves: ${item.saves}</div>
+      <div class="flag">${item.flags.join("<br/>")}</div>
+      <div class="row">
+        <button onclick="approve('${item.id}')">Підтвердити</button>
+        <button onclick="reject('${item.id}')">Відхилити</button>
+      </div>
+    `;
+    el.appendChild(div);
+  }
+}
+
+async function approve(id) {
+  await fetch(`/api/queue/${id}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  loadQueue();
+}
+async function reject(id) {
+  await fetch(`/api/queue/${id}/reject`, { method: "POST" });
+  loadQueue();
+}
+
+async function loadReport() {
+  const campaignId = document.getElementById("reportCampaignId").value;
+  const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/report`);
+  const data = await res.json();
+  document.getElementById("report").innerHTML = `
+    <div class="card">
+      <div>Постів: ${data.summary.postCount}</div>
+      <div>Перегляди: ${data.summary.totalViews}</div>
+      <div>Охоплення: ${data.summary.totalReach}</div>
+      <div>Середній ER: ${(data.summary.averageEngagementRate * 100).toFixed(2)}%</div>
+    </div>
+    <pre>${data.narrative}</pre>
+  `;
+}
+
+loadQueue();
+</script>
+</body>
+</html>
