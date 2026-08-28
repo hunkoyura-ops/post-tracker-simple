@@ -7,7 +7,14 @@ import dotenv from "dotenv";
 
 import { extractMetrics, generateNarrative } from "./claude.js";
 import { validateMetrics } from "./validate.js";
-import { insertPost, updatePost, getQueue, getApprovedForCampaign } from "./db.js";
+import {
+  insertPost,
+  updatePost,
+  getQueue,
+  getApprovedForCampaign,
+  getCreators,
+  getApprovedForCreator,
+} from "./db.js";
 
 dotenv.config();
 
@@ -58,7 +65,7 @@ app.post("/api/submit", upload.single("screenshot"), async (req, res) => {
 });
 
 app.get("/api/queue", (req, res) => {
-  res.json(getQueue(req.query.campaignId));
+  res.json(getQueue(req.query.campaignId, req.query.creatorId));
 });
 
 app.post("/api/queue/:id/approve", (req, res) => {
@@ -72,6 +79,52 @@ app.post("/api/queue/:id/reject", (req, res) => {
   const post = updatePost(req.params.id, { status: "rejected" });
   if (!post) return res.status(404).json({ error: "Не знайдено" });
   res.json(post);
+});
+
+// List of creators seen so far — powers the filter dropdown.
+app.get("/api/creators", (req, res) => {
+  res.json(getCreators());
+});
+
+// Aggregate numbers for one creator across ALL campaigns.
+// Pure arithmetic, no AI call — instant and free.
+app.get("/api/creators/:creatorId/stats", (req, res) => {
+  const posts = getApprovedForCreator(req.params.creatorId);
+
+  const totalViews = posts.reduce((s, p) => s + (p.views ?? 0), 0);
+  const totalReach = posts.reduce((s, p) => s + (p.reach ?? 0), 0);
+  const totalEngagements = posts.reduce(
+    (s, p) => s + (p.likes ?? 0) + (p.comments ?? 0) + (p.shares ?? 0) + (p.saves ?? 0),
+    0
+  );
+  const campaigns = [...new Set(posts.map((p) => p.campaignId))];
+
+  const perPost = posts
+    .map((p) => {
+      const reach = p.reach ?? p.views ?? 0;
+      const eng = (p.likes ?? 0) + (p.comments ?? 0) + (p.shares ?? 0) + (p.saves ?? 0);
+      return {
+        id: p.id,
+        campaignId: p.campaignId,
+        platform: p.platform,
+        postedAt: p.postedAt,
+        views: p.views,
+        reach: p.reach,
+        engagementRate: reach > 0 ? eng / reach : 0,
+      };
+    })
+    .sort((a, b) => (a.postedAt < b.postedAt ? 1 : -1));
+
+  res.json({
+    creatorId: req.params.creatorId,
+    creatorName: posts[0]?.creatorName ?? null,
+    postCount: posts.length,
+    campaignCount: campaigns.length,
+    totalViews,
+    totalReach,
+    averageEngagementRate: totalReach > 0 ? totalEngagements / totalReach : 0,
+    posts: perPost,
+  });
 });
 
 app.get("/api/campaigns/:campaignId/report", async (req, res) => {
