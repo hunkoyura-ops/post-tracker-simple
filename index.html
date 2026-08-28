@@ -2,96 +2,573 @@
 <html lang="uk">
 <head>
 <meta charset="UTF-8" />
-<title>Трекінг результатів кампанії</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Post → Report — Трекінг результатів кампанії</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
-  body { font-family: -apple-system, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #222; }
-  h1 { font-size: 22px; } h2 { font-size: 18px; margin-top: 40px; border-top: 1px solid #eee; padding-top: 20px; }
-  form { display: grid; gap: 10px; max-width: 400px; }
-  label { font-size: 13px; color: #555; }
-  input, select { padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
-  button { padding: 8px 16px; border: none; background: #111; color: #fff; border-radius: 6px; cursor: pointer; }
-  .card { border: 1px solid #eee; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
-  .flag { color: #b45309; font-size: 13px; }
-  .thumb { max-width: 120px; border-radius: 6px; display: block; margin: 8px 0; }
-  pre { background: #fafafa; padding: 10px; border-radius: 6px; white-space: pre-wrap; }
-  .row { display: flex; gap: 8px; }
+  :root {
+    --bg: #0a0a0c;
+    --surface: #16161a;
+    --surface-2: #1c1c21;
+    --border: #2b2b31;
+    --coral: #e8685c;
+    --teal: #4fd8c4;
+    --text: #f2f2ed;
+    --text-dim: #9a9aa1;
+    --text-faint: #63636b;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    max-width: 1140px;
+    margin: 0 auto;
+    padding: 56px 24px 80px;
+    line-height: 1.5;
+  }
+
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--coral);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin: 0 0 16px;
+  }
+
+  h1 {
+    font-weight: 900;
+    font-size: 46px;
+    line-height: 1.05;
+    margin: 0 0 18px;
+    letter-spacing: -0.02em;
+  }
+  h1 .arrow { color: var(--teal); padding: 0 10px; }
+
+  .subtitle {
+    color: var(--text-dim);
+    font-size: 16px;
+    max-width: 620px;
+    margin: 0 0 40px;
+  }
+
+  /* ---- Campaign bar: the hero of an analytics tool ---- */
+  .campaign-bar {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface);
+    padding: 24px 28px;
+    margin-bottom: 20px;
+  }
+  .campaign-bar .controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding-bottom: 22px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+  }
+  .campaign-bar .controls label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-right: 4px;
+  }
+  .campaign-bar .controls input { flex: 1; min-width: 180px; }
+
+  .readout {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 28px;
+  }
+  @media (max-width: 700px) { .readout { grid-template-columns: 1fr 1fr; gap: 20px; } }
+  .readout .cell .num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .readout .cell .cap {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-top: 6px;
+  }
+
+  .narrative {
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--teal);
+    border-radius: 12px;
+    background: var(--surface);
+    padding: 22px 26px;
+    white-space: pre-wrap;
+    font-size: 14px;
+    color: var(--text-dim);
+    line-height: 1.65;
+    margin-bottom: 40px;
+  }
+  .narrative.hidden { display: none; }
+
+  /* ---- Creator profile: cross-campaign view for one person ---- */
+  .creator-card {
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--coral);
+    border-radius: 12px;
+    background: var(--surface);
+    padding: 22px 26px;
+    margin-bottom: 20px;
+  }
+  .creator-card.hidden { display: none; }
+  .creator-card .head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .creator-card .cname { font-size: 20px; font-weight: 700; }
+  .creator-card .cmeta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .creator-card .cstats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px;
+    margin-bottom: 18px;
+  }
+  .creator-card .cstats .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 600;
+  }
+  .creator-card .cstats .l {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-top: 4px;
+  }
+  .creator-card .history {
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .creator-card .history .hrow {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 5px 0;
+    flex-wrap: wrap;
+  }
+  .creator-card .history .hrow .left { color: var(--text-faint); }
+
+  /* ---- Split: intake (narrow) + ledger (wide) ---- */
+  .split {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 26px;
+  }
+
+  .section-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0 0 22px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--coral); flex-shrink: 0; }
+  .section-label .count {
+    margin-left: auto;
+    color: var(--text-faint);
+    letter-spacing: 0.06em;
+  }
+
+  .field { margin-bottom: 16px; }
+  .field label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 7px;
+  }
+
+  input[type="text"], input[type="number"], input[type="date"], input:not([type]) {
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 11px 13px;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+  }
+  input::placeholder { color: var(--text-faint); }
+  input:focus { outline: none; border-color: var(--teal); }
+  input[type="file"] {
+    width: 100%;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-dim);
+    font-size: 12px;
+    padding: 0;
+  }
+
+  .pill-row { display: flex; flex-wrap: wrap; gap: 7px; }
+  .pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 8px 15px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+  }
+  .pill:hover { border-color: var(--text-faint); }
+  .pill.active { border-color: var(--teal); color: var(--teal); }
+
+  .btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 11px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--teal);
+    background: var(--teal);
+    color: #06201b;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity .15s;
+    white-space: nowrap;
+  }
+  .btn:hover { opacity: .88; }
+  .btn.ghost {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .btn.ghost:hover { border-color: var(--text-faint); opacity: 1; }
+  .btn.tiny { padding: 7px 14px; font-size: 11px; }
+  .btn.full { width: 100%; }
+
+  .status-line {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    color: var(--text-faint);
+    white-space: pre-wrap;
+  }
+  .status-line.ok { color: var(--teal); }
+  .status-line.warn { color: var(--coral); }
+
+  /* ---- Ledger rows: the signature element of this product ---- */
+  .ledger { display: flex; flex-direction: column; }
+  .ledger-row {
+    display: grid;
+    grid-template-columns: 64px 1fr auto;
+    gap: 16px;
+    align-items: start;
+    padding: 18px 0 18px 16px;
+    border-top: 1px solid var(--border);
+    border-left: 2px solid var(--coral);
+    margin-left: -26px;
+    padding-left: 24px;
+  }
+  .ledger-row:first-child { border-top: none; }
+  .ledger-thumb {
+    width: 64px;
+    height: 64px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+  .ledger-main .who {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .ledger-main .name { font-weight: 600; font-size: 15px; }
+  .ledger-main .meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.04em;
+  }
+  .nums {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 18px;
+    margin-bottom: 10px;
+  }
+  .nums span i { color: var(--text-faint); font-style: normal; }
+  .why {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--coral);
+    line-height: 1.6;
+  }
+  .why div { margin-bottom: 3px; }
+  .actions { display: flex; flex-direction: column; gap: 7px; }
+  @media (max-width: 620px) {
+    .ledger-row { grid-template-columns: 48px 1fr; }
+    .ledger-thumb { width: 48px; height: 48px; }
+    .actions { grid-column: 1 / -1; flex-direction: row; }
+  }
+
+  .empty {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-faint);
+    padding: 10px 0;
+  }
 </style>
 </head>
 <body>
 
-<h1>Трекінг результатів кампанії</h1>
+<p class="eyebrow">INFLUENCE &amp; CONTENT OPS</p>
+<h1>Post <span class="arrow">→</span> Report</h1>
+<p class="subtitle">Скриншот статистики перетворюється на перевірені цифри: метрики зчитуються автоматично, сумнівне відкладається на ручний контроль, а по кампанії збирається зведення з висновком.</p>
 
-<h2>1. Завантажити скриншот</h2>
-<form id="uploadForm">
-  <label>Кампанія (campaignId)</label>
-  <input name="campaignId" required value="campaign-1" />
-  <label>Ім'я криейтора</label>
-  <input name="creatorName" required />
-  <label>ID криейтора</label>
-  <input name="creatorId" required />
-  <label>Підписники криейтора</label>
-  <input name="creatorFollowers" type="number" required />
-  <label>Платформа</label>
-  <select name="platform">
-    <option value="instagram">Instagram</option>
-    <option value="tiktok">TikTok</option>
-    <option value="youtube">YouTube</option>
-  </select>
-  <label>Дата публікації</label>
-  <input name="postedAt" type="date" required />
-  <label>Скриншот</label>
-  <input name="screenshot" type="file" accept="image/*" required />
-  <button type="submit">Завантажити і розпізнати</button>
-</form>
-<pre id="uploadResult"></pre>
-
-<h2>2. Черга на ручну перевірку</h2>
-<div class="row">
-  <input id="queueCampaignFilter" placeholder="campaignId (порожньо = всі)" />
-  <button onclick="loadQueue()">Оновити чергу</button>
+<div class="campaign-bar">
+  <div class="controls">
+    <label>Campaign</label>
+    <input id="campaignId" value="campaign-1" placeholder="campaign-1" />
+    <label>Creator</label>
+    <input id="creatorFilter" list="creatorList" placeholder="всі" />
+    <datalist id="creatorList"></datalist>
+    <button class="btn tiny" onclick="loadReport()">Load report</button>
+    <button class="btn ghost tiny" onclick="applyFilters()">Apply</button>
+  </div>
+  <div class="readout">
+    <div class="cell"><div class="num" id="statPosts">—</div><div class="cap">Approved posts</div></div>
+    <div class="cell"><div class="num" id="statViews">—</div><div class="cap">Views</div></div>
+    <div class="cell"><div class="num" id="statReach">—</div><div class="cap">Reach</div></div>
+    <div class="cell"><div class="num" id="statEr">—</div><div class="cap">Avg ER</div></div>
+  </div>
 </div>
-<div id="queue"></div>
 
-<h2>3. Звіт по кампанії</h2>
-<div class="row">
-  <input id="reportCampaignId" placeholder="campaignId" value="campaign-1" />
-  <button onclick="loadReport()">Згенерувати звіт</button>
+<div class="creator-card hidden" id="creatorCard"></div>
+
+<div class="narrative hidden" id="narrative"></div>
+
+<div class="split">
+  <div class="panel">
+    <p class="section-label"><span class="dot"></span>Intake</p>
+    <form id="uploadForm">
+      <div class="field">
+        <label>Creator name</label>
+        <input name="creatorName" required placeholder="Olya Kravets" />
+      </div>
+      <div class="field">
+        <label>Creator ID</label>
+        <input name="creatorId" required placeholder="c_olya" />
+      </div>
+      <div class="field">
+        <label>Followers</label>
+        <input name="creatorFollowers" type="number" required placeholder="42000" />
+      </div>
+      <div class="field">
+        <label>Platform</label>
+        <div class="pill-row" id="platformPills">
+          <button type="button" class="pill active" data-value="instagram">IG</button>
+          <button type="button" class="pill" data-value="tiktok">TikTok</button>
+          <button type="button" class="pill" data-value="youtube">YT</button>
+        </div>
+        <input type="hidden" name="platform" id="platformInput" value="instagram" />
+      </div>
+      <div class="field">
+        <label>Posted at</label>
+        <input name="postedAt" type="date" required />
+      </div>
+      <div class="field">
+        <label>Screenshot</label>
+        <input name="screenshot" type="file" accept="image/*" required />
+      </div>
+      <button type="submit" class="btn full">Extract metrics</button>
+    </form>
+    <div class="status-line" id="status">Awaiting upload</div>
+  </div>
+
+  <div class="panel">
+    <p class="section-label">
+      <span class="dot"></span>Review ledger
+      <span class="count" id="queueCount"></span>
+    </p>
+    <div class="ledger" id="queue"></div>
+  </div>
 </div>
-<div id="report"></div>
 
 <script>
+const fmt = (n) => (n === null || n === undefined) ? "—" : Number(n).toLocaleString("uk-UA").replace(/\u00a0/g, " ");
+const campaignEl = document.getElementById("campaignId");
+const statusEl = document.getElementById("status");
+
+document.getElementById("platformPills").addEventListener("click", (e) => {
+  const btn = e.target.closest(".pill");
+  if (!btn) return;
+  document.querySelectorAll("#platformPills .pill").forEach(p => p.classList.remove("active"));
+  btn.classList.add("active");
+  document.getElementById("platformInput").value = btn.dataset.value;
+});
+
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = "status-line" + (kind ? " " + kind : "");
+}
+
 const uploadForm = document.getElementById("uploadForm");
 uploadForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const fd = new FormData(uploadForm);
-  document.getElementById("uploadResult").textContent = "Обробка...";
-  const res = await fetch("/api/submit", { method: "POST", body: fd });
-  const data = await res.json();
-  document.getElementById("uploadResult").textContent = JSON.stringify(data, null, 2);
-  loadQueue();
+  fd.append("campaignId", campaignEl.value);
+  setStatus("Reading screenshot…");
+  try {
+    const res = await fetch("/api/submit", { method: "POST", body: fd });
+    const data = await res.json();
+    if (data.error) { setStatus("Error: " + data.error, "warn"); return; }
+    const p = data.post;
+    if (data.status === "approved") {
+      setStatus(`Approved · views ${fmt(p.views)} · reach ${fmt(p.reach)}`, "ok");
+    } else {
+      setStatus(`Flagged for review · ${p.flags.length} issue(s)`, "warn");
+    }
+    loadQueue();
+    loadCreatorList();
+  } catch (err) {
+    setStatus("Network error: " + err.message, "warn");
+  }
 });
 
+async function loadCreatorList() {
+  const res = await fetch("/api/creators");
+  const creators = await res.json();
+  const dl = document.getElementById("creatorList");
+  dl.innerHTML = creators
+    .map((c) => `<option value="${c.creatorId}">${c.creatorName}</option>`)
+    .join("");
+}
+
+async function loadCreatorCard() {
+  const creatorId = document.getElementById("creatorFilter").value.trim();
+  const card = document.getElementById("creatorCard");
+  if (!creatorId) {
+    card.classList.add("hidden");
+    return;
+  }
+  const res = await fetch(`/api/creators/${encodeURIComponent(creatorId)}/stats`);
+  const s = await res.json();
+  card.classList.remove("hidden");
+  if (!s.postCount) {
+    card.innerHTML = `<div class="cmeta">Немає підтверджених постів для «${creatorId}»</div>`;
+    return;
+  }
+  card.innerHTML = `
+    <div class="head">
+      <span class="cname">${s.creatorName ?? creatorId}</span>
+      <span class="cmeta">across ${s.campaignCount} campaign(s)</span>
+    </div>
+    <div class="cstats">
+      <div><div class="n">${fmt(s.postCount)}</div><div class="l">Posts</div></div>
+      <div><div class="n">${fmt(s.totalViews)}</div><div class="l">Views</div></div>
+      <div><div class="n">${fmt(s.totalReach)}</div><div class="l">Reach</div></div>
+      <div><div class="n">${(s.averageEngagementRate * 100).toFixed(1)}%</div><div class="l">Avg ER</div></div>
+    </div>
+    <div class="history">
+      ${s.posts
+        .map(
+          (p) => `<div class="hrow">
+            <span class="left">${p.postedAt} · ${p.platform} · ${p.campaignId}</span>
+            <span>views ${fmt(p.views)} · ER ${(p.engagementRate * 100).toFixed(1)}%</span>
+          </div>`
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function applyFilters() {
+  loadQueue();
+  loadCreatorCard();
+}
+
 async function loadQueue() {
-  const campaignId = document.getElementById("queueCampaignFilter").value;
-  const res = await fetch("/api/queue" + (campaignId ? "?campaignId=" + encodeURIComponent(campaignId) : ""));
+  const campaignId = campaignEl.value;
+  const creatorId = document.getElementById("creatorFilter").value.trim();
+  const params = new URLSearchParams();
+  if (campaignId) params.set("campaignId", campaignId);
+  if (creatorId) params.set("creatorId", creatorId);
+  const res = await fetch("/api/queue" + (params.toString() ? "?" + params.toString() : ""));
   const items = await res.json();
   const el = document.getElementById("queue");
+  document.getElementById("queueCount").textContent = items.length ? items.length + " pending" : "";
   el.innerHTML = "";
-  if (items.length === 0) { el.textContent = "Черга порожня."; return; }
+  if (items.length === 0) {
+    el.innerHTML = '<div class="empty">Нічого не очікує перевірки.</div>';
+    return;
+  }
   for (const item of items) {
-    const div = document.createElement("div");
-    div.className = "card";
-    div.innerHTML = `
-      <strong>${item.creatorName}</strong> (${item.platform}) — ${item.postedAt}
-      <img class="thumb" src="${item.screenshotPath}" />
-      <div>views: ${item.views}, reach: ${item.reach}, likes: ${item.likes}, comments: ${item.comments}, shares: ${item.shares}, saves: ${item.saves}</div>
-      <div class="flag">${item.flags.join("<br/>")}</div>
-      <div class="row">
-        <button onclick="approve('${item.id}')">Підтвердити</button>
-        <button onclick="reject('${item.id}')">Відхилити</button>
+    const row = document.createElement("div");
+    row.className = "ledger-row";
+    row.innerHTML = `
+      <img class="ledger-thumb" src="${item.screenshotPath}" alt="" />
+      <div class="ledger-main">
+        <div class="who">
+          <span class="name">${item.creatorName}</span>
+          <span class="meta">${item.platform} · ${item.postedAt}</span>
+        </div>
+        <div class="nums">
+          <span><i>views</i> ${fmt(item.views)}</span>
+          <span><i>reach</i> ${fmt(item.reach)}</span>
+          <span><i>likes</i> ${fmt(item.likes)}</span>
+          <span><i>comm</i> ${fmt(item.comments)}</span>
+          <span><i>shares</i> ${fmt(item.shares)}</span>
+          <span><i>saves</i> ${fmt(item.saves)}</span>
+        </div>
+        <div class="why">${(item.flags || []).map(f => "<div>" + f + "</div>").join("")}</div>
+      </div>
+      <div class="actions">
+        <button class="btn tiny" onclick="approve('${item.id}')">Approve</button>
+        <button class="btn ghost tiny" onclick="reject('${item.id}')">Reject</button>
       </div>
     `;
-    el.appendChild(div);
+    el.appendChild(row);
   }
 }
 
@@ -105,21 +582,25 @@ async function reject(id) {
 }
 
 async function loadReport() {
-  const campaignId = document.getElementById("reportCampaignId").value;
+  const campaignId = campaignEl.value;
+  const narrativeEl = document.getElementById("narrative");
+  narrativeEl.classList.remove("hidden");
+  narrativeEl.textContent = "Збираю звіт…";
   const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/report`);
   const data = await res.json();
-  document.getElementById("report").innerHTML = `
-    <div class="card">
-      <div>Постів: ${data.summary.postCount}</div>
-      <div>Перегляди: ${data.summary.totalViews}</div>
-      <div>Охоплення: ${data.summary.totalReach}</div>
-      <div>Середній ER: ${(data.summary.averageEngagementRate * 100).toFixed(2)}%</div>
-    </div>
-    <pre>${data.narrative}</pre>
-  `;
+  if (data.error) {
+    narrativeEl.textContent = "Error: " + data.error;
+    return;
+  }
+  document.getElementById("statPosts").textContent = fmt(data.summary.postCount);
+  document.getElementById("statViews").textContent = fmt(data.summary.totalViews);
+  document.getElementById("statReach").textContent = fmt(data.summary.totalReach);
+  document.getElementById("statEr").textContent = (data.summary.averageEngagementRate * 100).toFixed(1) + "%";
+  narrativeEl.textContent = data.narrative;
 }
 
 loadQueue();
+loadCreatorList();
 </script>
 </body>
 </html>
