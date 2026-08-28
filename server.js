@@ -6,6 +6,7 @@ import crypto from "crypto";
 import dotenv from "dotenv";
 
 import { extractMetrics, generateNarrative } from "./claude.js";
+import { renderReportHtml } from "./report-template.js";
 import { validateMetrics } from "./validate.js";
 import {
   insertPost,
@@ -127,22 +128,28 @@ app.get("/api/creators/:creatorId/stats", (req, res) => {
   });
 });
 
+// Shared so the JSON view and the printable report can never disagree.
+function buildCampaignReport(campaignId) {
+  const posts = getApprovedForCampaign(campaignId);
+  const totalViews = posts.reduce((s, p) => s + (p.views ?? 0), 0);
+  const totalReach = posts.reduce((s, p) => s + (p.reach ?? 0), 0);
+  const totalEngagements = posts.reduce(
+    (s, p) => s + (p.likes ?? 0) + (p.comments ?? 0) + (p.shares ?? 0) + (p.saves ?? 0),
+    0
+  );
+  const summary = {
+    totalViews,
+    totalReach,
+    totalEngagements,
+    averageEngagementRate: totalReach > 0 ? totalEngagements / totalReach : 0,
+    postCount: posts.length,
+  };
+  return { posts, summary };
+}
+
 app.get("/api/campaigns/:campaignId/report", async (req, res) => {
   try {
-    const posts = getApprovedForCampaign(req.params.campaignId);
-    const totalViews = posts.reduce((s, p) => s + (p.views ?? 0), 0);
-    const totalReach = posts.reduce((s, p) => s + (p.reach ?? 0), 0);
-    const totalEngagements = posts.reduce(
-      (s, p) => s + (p.likes ?? 0) + (p.comments ?? 0) + (p.shares ?? 0) + (p.saves ?? 0),
-      0
-    );
-    const summary = {
-      totalViews,
-      totalReach,
-      totalEngagements,
-      averageEngagementRate: totalReach > 0 ? totalEngagements / totalReach : 0,
-      postCount: posts.length,
-    };
+    const { posts, summary } = buildCampaignReport(req.params.campaignId);
     const narrative =
       posts.length > 0
         ? await generateNarrative(req.params.campaignId, posts, summary)
@@ -151,6 +158,32 @@ app.get("/api/campaigns/:campaignId/report", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Printable, client-facing report. Open in a tab, then "Save as PDF".
+app.get("/campaigns/:campaignId/report.html", async (req, res) => {
+  try {
+    const { posts, summary } = buildCampaignReport(req.params.campaignId);
+    const narrative =
+      posts.length > 0
+        ? await generateNarrative(req.params.campaignId, posts, summary)
+        : "Ще немає підтверджених постів у цій кампанії.";
+
+    const html = renderReportHtml({
+      campaignId: req.params.campaignId,
+      posts,
+      summary,
+      narrative,
+      generatedAt: new Date().toISOString().slice(0, 10),
+    });
+    res.set("Content-Type", "text/html; charset=utf-8").send(html);
+  } catch (err) {
+    console.error(err);
+    res
+      .status(500)
+      .set("Content-Type", "text/html; charset=utf-8")
+      .send(`<p style="font-family:monospace">Report error: ${err.message}</p>`);
   }
 });
 
