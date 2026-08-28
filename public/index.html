@@ -374,6 +374,7 @@
     <input id="creatorFilter" list="creatorList" placeholder="всі" />
     <datalist id="creatorList"></datalist>
     <button class="btn tiny" onclick="loadReport()">Load report</button>
+    <button class="btn ghost tiny" onclick="openBrandReport()">Brand report ↗</button>
     <button class="btn ghost tiny" onclick="applyFilters()">Apply</button>
   </div>
   <div class="readout">
@@ -521,6 +522,12 @@ async function loadCreatorCard() {
         .join("")}
     </div>
   `;
+}
+
+function openBrandReport() {
+  const campaignId = campaignEl.value.trim();
+  if (!campaignId) return;
+  window.open(`/campaigns/${encodeURIComponent(campaignId)}/report.html`, "_blank");
 }
 
 function applyFilters() {
