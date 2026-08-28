@@ -120,6 +120,66 @@
   }
   .narrative.hidden { display: none; }
 
+  /* ---- Creator profile: cross-campaign view for one person ---- */
+  .creator-card {
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--coral);
+    border-radius: 12px;
+    background: var(--surface);
+    padding: 22px 26px;
+    margin-bottom: 20px;
+  }
+  .creator-card.hidden { display: none; }
+  .creator-card .head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .creator-card .cname { font-size: 20px; font-weight: 700; }
+  .creator-card .cmeta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .creator-card .cstats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px;
+    margin-bottom: 18px;
+  }
+  .creator-card .cstats .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 600;
+  }
+  .creator-card .cstats .l {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-top: 4px;
+  }
+  .creator-card .history {
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .creator-card .history .hrow {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 5px 0;
+    flex-wrap: wrap;
+  }
+  .creator-card .history .hrow .left { color: var(--text-faint); }
+
   /* ---- Split: intake (narrow) + ledger (wide) ---- */
   .split {
     display: grid;
@@ -310,8 +370,11 @@
   <div class="controls">
     <label>Campaign</label>
     <input id="campaignId" value="campaign-1" placeholder="campaign-1" />
+    <label>Creator</label>
+    <input id="creatorFilter" list="creatorList" placeholder="всі" />
+    <datalist id="creatorList"></datalist>
     <button class="btn tiny" onclick="loadReport()">Load report</button>
-    <button class="btn ghost tiny" onclick="loadQueue()">Refresh queue</button>
+    <button class="btn ghost tiny" onclick="applyFilters()">Apply</button>
   </div>
   <div class="readout">
     <div class="cell"><div class="num" id="statPosts">—</div><div class="cap">Approved posts</div></div>
@@ -320,6 +383,8 @@
     <div class="cell"><div class="num" id="statEr">—</div><div class="cap">Avg ER</div></div>
   </div>
 </div>
+
+<div class="creator-card hidden" id="creatorCard"></div>
 
 <div class="narrative hidden" id="narrative"></div>
 
@@ -405,14 +470,71 @@ uploadForm.addEventListener("submit", async (e) => {
       setStatus(`Flagged for review · ${p.flags.length} issue(s)`, "warn");
     }
     loadQueue();
+    loadCreatorList();
   } catch (err) {
     setStatus("Network error: " + err.message, "warn");
   }
 });
 
+async function loadCreatorList() {
+  const res = await fetch("/api/creators");
+  const creators = await res.json();
+  const dl = document.getElementById("creatorList");
+  dl.innerHTML = creators
+    .map((c) => `<option value="${c.creatorId}">${c.creatorName}</option>`)
+    .join("");
+}
+
+async function loadCreatorCard() {
+  const creatorId = document.getElementById("creatorFilter").value.trim();
+  const card = document.getElementById("creatorCard");
+  if (!creatorId) {
+    card.classList.add("hidden");
+    return;
+  }
+  const res = await fetch(`/api/creators/${encodeURIComponent(creatorId)}/stats`);
+  const s = await res.json();
+  card.classList.remove("hidden");
+  if (!s.postCount) {
+    card.innerHTML = `<div class="cmeta">Немає підтверджених постів для «${creatorId}»</div>`;
+    return;
+  }
+  card.innerHTML = `
+    <div class="head">
+      <span class="cname">${s.creatorName ?? creatorId}</span>
+      <span class="cmeta">across ${s.campaignCount} campaign(s)</span>
+    </div>
+    <div class="cstats">
+      <div><div class="n">${fmt(s.postCount)}</div><div class="l">Posts</div></div>
+      <div><div class="n">${fmt(s.totalViews)}</div><div class="l">Views</div></div>
+      <div><div class="n">${fmt(s.totalReach)}</div><div class="l">Reach</div></div>
+      <div><div class="n">${(s.averageEngagementRate * 100).toFixed(1)}%</div><div class="l">Avg ER</div></div>
+    </div>
+    <div class="history">
+      ${s.posts
+        .map(
+          (p) => `<div class="hrow">
+            <span class="left">${p.postedAt} · ${p.platform} · ${p.campaignId}</span>
+            <span>views ${fmt(p.views)} · ER ${(p.engagementRate * 100).toFixed(1)}%</span>
+          </div>`
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function applyFilters() {
+  loadQueue();
+  loadCreatorCard();
+}
+
 async function loadQueue() {
   const campaignId = campaignEl.value;
-  const res = await fetch("/api/queue" + (campaignId ? "?campaignId=" + encodeURIComponent(campaignId) : ""));
+  const creatorId = document.getElementById("creatorFilter").value.trim();
+  const params = new URLSearchParams();
+  if (campaignId) params.set("campaignId", campaignId);
+  if (creatorId) params.set("creatorId", creatorId);
+  const res = await fetch("/api/queue" + (params.toString() ? "?" + params.toString() : ""));
   const items = await res.json();
   const el = document.getElementById("queue");
   document.getElementById("queueCount").textContent = items.length ? items.length + " pending" : "";
@@ -478,6 +600,7 @@ async function loadReport() {
 }
 
 loadQueue();
+loadCreatorList();
 </script>
 </body>
 </html>

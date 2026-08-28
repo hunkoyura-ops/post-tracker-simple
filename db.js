@@ -36,10 +36,13 @@ function updatePost(id, updates) {
   return db.posts[idx];
 }
 
-function getQueue(campaignId) {
+function getQueue(campaignId, creatorId) {
   const db = loadDb();
   return db.posts.filter(
-    (p) => p.status === "pending_review" && (!campaignId || p.campaignId === campaignId)
+    (p) =>
+      p.status === "pending_review" &&
+      (!campaignId || p.campaignId === campaignId) &&
+      (!creatorId || p.creatorId === creatorId)
   );
 }
 
@@ -48,9 +51,35 @@ function getApprovedForCampaign(campaignId) {
   return db.posts.filter((p) => p.status === "approved" && p.campaignId === campaignId);
 }
 
+// Distinct creators seen so far, for the filter dropdown.
+function getCreators() {
+  const db = loadDb();
+  const seen = new Map();
+  for (const p of db.posts) {
+    if (!seen.has(p.creatorId)) {
+      seen.set(p.creatorId, { creatorId: p.creatorId, creatorName: p.creatorName });
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.creatorName.localeCompare(b.creatorName));
+}
+
+// All approved posts for one creator, across every campaign.
+function getApprovedForCreator(creatorId) {
+  const db = loadDb();
+  return db.posts.filter((p) => p.status === "approved" && p.creatorId === creatorId);
+}
+
 function getPost(id) {
   const db = loadDb();
   return db.posts.find((p) => p.id === id) || null;
 }
 
-export { insertPost, updatePost, getQueue, getApprovedForCampaign, getPost };
+export {
+  insertPost,
+  updatePost,
+  getQueue,
+  getApprovedForCampaign,
+  getCreators,
+  getApprovedForCreator,
+  getPost,
+};
