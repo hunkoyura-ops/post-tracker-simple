@@ -146,7 +146,7 @@ async function getJwks() {
   if (jwksCache.keys && Date.now() - jwksCache.fetchedAt < JWKS_TTL_MS) {
     return jwksCache.keys;
   }
-  const res = await fetch(JWKS_URL);
+  const res = await fetch(JWKS_URL, { signal: AbortSignal.timeout(10000) });
   if (!res.ok) throw new Error(`Could not fetch Telegram signing keys (${res.status})`);
   const keys = await res.json();
   jwksCache = { keys, fetchedAt: Date.now() };
@@ -213,26 +213,55 @@ async function completeLogin(req) {
   });
 
   const basic = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
-  const res = await fetch(TOKEN_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${basic}`,
-    },
-    body,
-  });
+
+  let res;
+  try {
+    res = await fetch(TOKEN_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${basic}`,
+      },
+      body,
+      // Without a limit a stalled connection would hang the whole request
+      // and the user would just see the platform's error page.
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    console.error("[auth] token request failed:", err.name, err.message);
+    return {
+      ok: false,
+      reason:
+        err.name === "TimeoutError"
+          ? "Telegram не відповів вчасно, спробуйте ще раз"
+          : `не вдалося звернутись до Telegram: ${err.message}`,
+    };
+  }
 
   if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    console.error("[auth] token exchange rejected:", res.status, detail.slice(0, 300));
     return { ok: false, reason: `token exchange failed (${res.status})` };
   }
 
   const tokens = await res.json();
   if (!tokens.id_token) return { ok: false, reason: "no ID token returned" };
 
-  const jwks = await getJwks();
-  const verified = verifyIdToken(tokens.id_token, { jwks, clientId: CLIENT_ID });
-  if (!verified.ok) return { ok: false, reason: verified.reason };
+  let jwks;
+  try {
+    jwks = await getJwks();
+  } catch (err) {
+    console.error("[auth] could not load signing keys:", err.message);
+    return { ok: false, reason: "не вдалося отримати ключі Telegram" };
+  }
 
+  const verified = verifyIdToken(tokens.id_token, { jwks, clientId: CLIENT_ID });
+  if (!verified.ok) {
+    console.error("[auth] id_token rejected:", verified.reason);
+    return { ok: false, reason: verified.reason };
+  }
+
+  console.log("[auth] signed in:", verified.user.id, verified.user.username || "");
   return { ok: true, user: verified.user };
 }
 
