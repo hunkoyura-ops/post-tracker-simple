@@ -1,106 +1,245 @@
 import crypto from "crypto";
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-const BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME || "";
+const CLIENT_ID = process.env.TELEGRAM_CLIENT_ID || "";
+const CLIENT_SECRET = process.env.TELEGRAM_CLIENT_SECRET || "";
 const ALLOWED_IDS = (process.env.TELEGRAM_ALLOWED_IDS || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
-const SESSION_SECRET = process.env.SESSION_SECRET || BOT_TOKEN;
+const APP_URL = (process.env.APP_URL || "").replace(/\/$/, "");
+const SESSION_SECRET = process.env.SESSION_SECRET || CLIENT_SECRET;
 
-const MAX_AUTH_AGE_SECONDS = 300; // Telegram payload must be fresh (5 min)
+const ISSUER = "https://oauth.telegram.org";
+const AUTH_ENDPOINT = `${ISSUER}/auth`;
+const TOKEN_ENDPOINT = `${ISSUER}/token`;
+const JWKS_URL = `${ISSUER}/.well-known/jwks.json`;
+
 const SESSION_DAYS = 30;
 const COOKIE_NAME = "pt_session";
+const FLOW_COOKIE = "pt_oidc";
+const FLOW_MAX_AGE = 600; // 10 minutes to finish signing in
 
-// Auth is opt-in: with no bot token configured the app behaves as before.
-const AUTH_ENABLED = Boolean(BOT_TOKEN && BOT_USERNAME);
+// Auth is opt-in: without credentials the app behaves as it did before.
+const AUTH_ENABLED = Boolean(CLIENT_ID && CLIENT_SECRET);
 
 if (!AUTH_ENABLED) {
   console.warn(
-    "[auth] Telegram login is OFF — anyone with the URL can open this app.\n" +
-      "       Set TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME and TELEGRAM_ALLOWED_IDS to enable it."
+    "[auth] Telegram sign-in is OFF — anyone with the URL can open this app.\n" +
+      "       Set TELEGRAM_CLIENT_ID, TELEGRAM_CLIENT_SECRET and TELEGRAM_ALLOWED_IDS to enable it."
   );
 } else if (ALLOWED_IDS.length === 0) {
   console.warn(
-    "[auth] TELEGRAM_ALLOWED_IDS is empty — every Telegram user would be able to log in.\n" +
-      "       Add the Telegram numeric IDs that should have access."
+    "[auth] TELEGRAM_ALLOWED_IDS is empty — any Telegram user could sign in.\n" +
+      "       Add the numeric Telegram IDs that should have access."
   );
 }
 
-// ---- Telegram Login Widget verification ----------------------------------
-// Per Telegram's spec: secret key is SHA256(bot_token), and the signature is
-// HMAC-SHA256 over "key=value" lines sorted alphabetically, minus the hash.
-function verifyTelegramAuth(query) {
-  const { hash, ...fields } = query;
-  if (!hash || typeof hash !== "string") return null;
+// ---- small helpers --------------------------------------------------------
 
-  const checkString = Object.keys(fields)
-    .sort()
-    .map((k) => `${k}=${fields[k]}`)
-    .join("\n");
+const b64url = (buf) => Buffer.from(buf).toString("base64url");
 
-  const secretKey = crypto.createHash("sha256").update(BOT_TOKEN).digest();
-  const computed = crypto
-    .createHmac("sha256", secretKey)
-    .update(checkString)
-    .digest("hex");
+function sign(value, secret = SESSION_SECRET) {
+  return crypto.createHmac("sha256", secret).update(value).digest("base64url");
+}
 
-  const a = Buffer.from(computed, "hex");
-  const b = Buffer.from(hash, "hex");
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+function safeEqual(a, b) {
+  const ba = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+}
 
-  // Reject replayed / stale payloads.
-  const authDate = Number(fields.auth_date || 0);
-  if (!authDate || Math.floor(Date.now() / 1000) - authDate > MAX_AUTH_AGE_SECONDS) {
-    return null;
+function parseCookies(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const i = part.indexOf("=");
+    if (i === -1) continue;
+    out[part.slice(0, i).trim()] = part.slice(i + 1).trim();
   }
-
-  return {
-    id: String(fields.id),
-    username: fields.username || null,
-    firstName: fields.first_name || null,
-  };
+  return out;
 }
 
-function isAllowed(userId) {
-  if (ALLOWED_IDS.length === 0) return true; // warned about above
-  return ALLOWED_IDS.includes(String(userId));
+function packCookie(payload, secret = SESSION_SECRET) {
+  const body = b64url(JSON.stringify(payload));
+  return `${body}.${sign(body, secret)}`;
 }
 
-// ---- Signed session cookie (stateless, no session store) ------------------
-
-function signSession(payload) {
-  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const sig = crypto.createHmac("sha256", SESSION_SECRET).update(body).digest("base64url");
-  return `${body}.${sig}`;
-}
-
-function readSession(cookieValue) {
-  if (!cookieValue || typeof cookieValue !== "string") return null;
-  const [body, sig] = cookieValue.split(".");
-  if (!body || !sig) return null;
-
-  const expected = crypto
-    .createHmac("sha256", SESSION_SECRET)
-    .update(body)
-    .digest("base64url");
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-
+function unpackCookie(value, secret = SESSION_SECRET) {
+  if (!value || typeof value !== "string") return null;
+  const [body, sig] = value.split(".");
+  if (!body || !sig || !safeEqual(sig, sign(body, secret))) return null;
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString());
     if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null;
-    if (!isAllowed(payload.id)) return null; // revoked since the cookie was issued
     return payload;
   } catch {
     return null;
   }
 }
 
+// ---- ID token verification -----------------------------------------------
+// Pure function so it can be tested with locally generated keys.
+function verifyIdToken(token, { jwks, clientId, issuer = ISSUER, now = Date.now() }) {
+  const parts = String(token).split(".");
+  if (parts.length !== 3) return { ok: false, reason: "malformed token" };
+
+  const [headerB64, payloadB64, sigB64] = parts;
+
+  let header, payload;
+  try {
+    header = JSON.parse(Buffer.from(headerB64, "base64url").toString());
+    payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString());
+  } catch {
+    return { ok: false, reason: "unreadable token" };
+  }
+
+  const keys = jwks.keys || [];
+  // If the token names a key, that exact key must exist — falling back to
+  // another one would let a token signed with any Telegram key pass.
+  const jwk = header.kid
+    ? keys.find((k) => k.kid === header.kid)
+    : keys.find((k) => k.alg === header.alg);
+  if (!jwk) return { ok: false, reason: "no matching signing key" };
+
+  const ALGS = {
+    RS256: { verify: "RSA-SHA256" },
+    ES256: { verify: "sha256", dsaEncoding: "ieee-p1363" },
+  };
+  const alg = ALGS[header.alg];
+  if (!alg) return { ok: false, reason: `unsupported algorithm ${header.alg}` };
+
+  let key;
+  try {
+    key = crypto.createPublicKey({ key: jwk, format: "jwk" });
+  } catch {
+    return { ok: false, reason: "bad signing key" };
+  }
+
+  const verifier = crypto.createVerify(alg.verify);
+  verifier.update(`${headerB64}.${payloadB64}`);
+  const signatureValid = verifier.verify(
+    alg.dsaEncoding ? { key, dsaEncoding: alg.dsaEncoding } : key,
+    Buffer.from(sigB64, "base64url")
+  );
+  if (!signatureValid) return { ok: false, reason: "signature does not match" };
+
+  if (payload.iss !== issuer) return { ok: false, reason: "wrong issuer" };
+  if (String(payload.aud) !== String(clientId)) return { ok: false, reason: "wrong audience" };
+  if (!payload.exp || payload.exp * 1000 <= now) return { ok: false, reason: "token expired" };
+
+  return {
+    ok: true,
+    user: {
+      id: String(payload.id ?? payload.sub),
+      username: payload.preferred_username || null,
+      name: payload.name || null,
+    },
+  };
+}
+
+// ---- JWKS (cached; signing keys rotate rarely) ----------------------------
+
+let jwksCache = { keys: null, fetchedAt: 0 };
+const JWKS_TTL_MS = 6 * 60 * 60 * 1000;
+
+async function getJwks() {
+  if (jwksCache.keys && Date.now() - jwksCache.fetchedAt < JWKS_TTL_MS) {
+    return jwksCache.keys;
+  }
+  const res = await fetch(JWKS_URL);
+  if (!res.ok) throw new Error(`Could not fetch Telegram signing keys (${res.status})`);
+  const keys = await res.json();
+  jwksCache = { keys, fetchedAt: Date.now() };
+  return keys;
+}
+
+// ---- OIDC flow ------------------------------------------------------------
+
+function redirectUri(req) {
+  if (APP_URL) return `${APP_URL}/auth/telegram/callback`;
+  return `${req.protocol}://${req.get("host")}/auth/telegram/callback`;
+}
+
+// Step 1: send the user to Telegram, remembering state + PKCE verifier.
+function beginLogin(req, res) {
+  const state = b64url(crypto.randomBytes(24));
+  const verifier = b64url(crypto.randomBytes(48));
+  const challenge = b64url(crypto.createHash("sha256").update(verifier).digest());
+
+  const flow = packCookie({
+    state,
+    verifier,
+    exp: Math.floor(Date.now() / 1000) + FLOW_MAX_AGE,
+  });
+
+  const url = new URL(AUTH_ENDPOINT);
+  url.searchParams.set("client_id", CLIENT_ID);
+  url.searchParams.set("redirect_uri", redirectUri(req));
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", "openid profile");
+  url.searchParams.set("state", state);
+  url.searchParams.set("code_challenge", challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+
+  res
+    .set(
+      "Set-Cookie",
+      `${FLOW_COOKIE}=${flow}; HttpOnly; Path=/; Max-Age=${FLOW_MAX_AGE}; SameSite=Lax; Secure`
+    )
+    .redirect(url.toString());
+}
+
+// Step 2: Telegram sends the user back with a code; swap it for an ID token.
+async function completeLogin(req) {
+  const { code, state } = req.query;
+  if (!code || !state) return { ok: false, reason: "missing code" };
+
+  const flow = unpackCookie(parseCookies(req.headers.cookie)[FLOW_COOKIE]);
+  if (!flow) return { ok: false, reason: "sign-in took too long, try again" };
+  if (!safeEqual(flow.state, state)) return { ok: false, reason: "state mismatch" };
+
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: String(code),
+    redirect_uri: redirectUri(req),
+    client_id: CLIENT_ID,
+    code_verifier: flow.verifier,
+  });
+
+  const basic = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
+  const res = await fetch(TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${basic}`,
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    return { ok: false, reason: `token exchange failed (${res.status})` };
+  }
+
+  const tokens = await res.json();
+  if (!tokens.id_token) return { ok: false, reason: "no ID token returned" };
+
+  const jwks = await getJwks();
+  const verified = verifyIdToken(tokens.id_token, { jwks, clientId: CLIENT_ID });
+  if (!verified.ok) return { ok: false, reason: verified.reason };
+
+  return { ok: true, user: verified.user };
+}
+
+function isAllowed(userId) {
+  if (ALLOWED_IDS.length === 0) return true; // warned about at startup
+  return ALLOWED_IDS.includes(String(userId));
+}
+
+// ---- Session --------------------------------------------------------------
+
 function makeSessionCookie(user) {
   const exp = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400;
-  const value = signSession({ id: user.id, username: user.username, exp });
+  const value = packCookie({ id: user.id, username: user.username, exp });
   return `${COOKIE_NAME}=${value}; HttpOnly; Path=/; Max-Age=${SESSION_DAYS * 86400}; SameSite=Lax; Secure`;
 }
 
@@ -108,29 +247,26 @@ function clearSessionCookie() {
   return `${COOKIE_NAME}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax; Secure`;
 }
 
-// Minimal cookie parsing — avoids pulling in another dependency.
-function parseCookies(header) {
-  const out = {};
-  if (!header) return out;
-  for (const part of header.split(";")) {
-    const idx = part.indexOf("=");
-    if (idx === -1) continue;
-    out[part.slice(0, idx).trim()] = part.slice(idx + 1).trim();
-  }
-  return out;
+function clearFlowCookie() {
+  return `${FLOW_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax; Secure`;
+}
+
+function readSession(cookieValue) {
+  const payload = unpackCookie(cookieValue);
+  if (!payload) return null;
+  if (!isAllowed(payload.id)) return null; // access revoked since sign-in
+  return payload;
 }
 
 function requireAuth(req, res, next) {
   if (!AUTH_ENABLED) return next();
 
-  const cookies = parseCookies(req.headers.cookie);
-  const session = readSession(cookies[COOKIE_NAME]);
+  const session = readSession(parseCookies(req.headers.cookie)[COOKIE_NAME]);
   if (session) {
     req.user = session;
     return next();
   }
 
-  // API calls get a status code; page loads get sent to the login screen.
   if (req.path.startsWith("/api/")) {
     return res.status(401).json({ error: "Not signed in" });
   }
@@ -161,7 +297,7 @@ function renderLoginPage(error) {
     font-family: 'Inter', -apple-system, sans-serif;
     padding: 24px;
   }
-  .box { max-width: 380px; width: 100%; text-align: center; }
+  .box { max-width: 400px; width: 100%; text-align: center; }
   .eyebrow {
     font-family: 'JetBrains Mono', monospace;
     color: #e8685c; font-size: 11px;
@@ -176,7 +312,14 @@ function renderLoginPage(error) {
   }
   .hint { color: #63636b; }
   .err { color: #e8685c; }
-  .widget { display: flex; justify-content: center; }
+  .btn {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; font-weight: 600;
+    padding: 13px 28px; border-radius: 8px;
+    background: #4fd8c4; color: #06201b;
+    text-decoration: none;
+  }
 </style>
 </head>
 <body>
@@ -184,14 +327,7 @@ function renderLoginPage(error) {
     <p class="eyebrow">INFLUENCE &amp; CONTENT OPS</p>
     <h1>Post <span class="arrow">→</span> Report</h1>
     ${message}
-    <div class="widget">
-      <script async src="https://telegram.org/js/telegram-widget.js?22"
-        data-telegram-login="${BOT_USERNAME}"
-        data-size="large"
-        data-radius="8"
-        data-auth-url="/auth/telegram"
-        data-request-access="write"></script>
-    </div>
+    <a class="btn" href="/auth/telegram">Log in with Telegram</a>
   </div>
 </body>
 </html>`;
@@ -199,10 +335,13 @@ function renderLoginPage(error) {
 
 export {
   AUTH_ENABLED,
-  verifyTelegramAuth,
+  beginLogin,
+  completeLogin,
+  verifyIdToken,
   isAllowed,
   makeSessionCookie,
   clearSessionCookie,
+  clearFlowCookie,
   requireAuth,
   renderLoginPage,
 };
