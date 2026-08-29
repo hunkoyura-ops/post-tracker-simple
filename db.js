@@ -36,6 +36,44 @@ function updatePost(id, updates) {
   return db.posts[idx];
 }
 
+// Records an event against a post and applies field changes in one write,
+// so the stored numbers and the log can never drift apart.
+function updatePostWithEvent(id, updates, event) {
+  const db = loadDb();
+  const idx = db.posts.findIndex((p) => p.id === id);
+  if (idx === -1) return null;
+
+  const current = db.posts[idx];
+  const history = Array.isArray(current.history) ? current.history : [];
+
+  db.posts[idx] = {
+    ...current,
+    ...updates,
+    history: event ? [...history, event] : history,
+  };
+  saveDb(db);
+  return db.posts[idx];
+}
+
+// Every logged event across a campaign, newest first.
+function getActivity(campaignId, limit = 60) {
+  const db = loadDb();
+  const events = [];
+  for (const p of db.posts) {
+    if (campaignId && p.campaignId !== campaignId) continue;
+    for (const e of p.history || []) {
+      events.push({
+        ...e,
+        postId: p.id,
+        creatorName: p.creatorName,
+        campaignId: p.campaignId,
+        platform: p.platform,
+      });
+    }
+  }
+  return events.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, limit);
+}
+
 function getQueue(campaignId, creatorId) {
   const db = loadDb();
   return db.posts.filter(
@@ -77,6 +115,8 @@ function getPost(id) {
 export {
   insertPost,
   updatePost,
+  updatePostWithEvent,
+  getActivity,
   getQueue,
   getApprovedForCampaign,
   getCreators,
