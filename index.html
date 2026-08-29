@@ -358,6 +358,41 @@
     color: var(--text-faint);
     padding: 10px 0;
   }
+
+  /* ---- Activity log ---- */
+  .act-row {
+    display: grid;
+    grid-template-columns: 116px 92px 1fr;
+    gap: 14px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    align-items: baseline;
+  }
+  .act-row:first-child { border-top: none; }
+  .act-when { color: var(--text-faint); }
+  .act-tag {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    text-align: center;
+    white-space: nowrap;
+  }
+  .act-tag.approved, .act-tag.auto_approved { border-color: var(--teal); color: var(--teal); }
+  .act-tag.flagged, .act-tag.rejected { border-color: var(--coral); color: var(--coral); }
+  .act-tag.edited { border-color: var(--text-faint); color: var(--text); }
+  .act-what { color: var(--text-dim); line-height: 1.55; }
+  .act-what b { color: var(--text); font-weight: 600; }
+  .act-who { color: var(--text-faint); }
+  @media (max-width: 620px) {
+    .act-row { grid-template-columns: 1fr; gap: 4px; }
+    .act-tag { justify-self: start; }
+  }
 </style>
 </head>
 <body>
@@ -376,6 +411,7 @@
     <button class="btn tiny" onclick="loadReport()">Load report</button>
     <button class="btn ghost tiny" onclick="openBrandReport()">Brand report ↗</button>
     <button class="btn ghost tiny" onclick="applyFilters()">Apply</button>
+    <a href="/auth/logout" class="btn ghost tiny" style="text-decoration:none;display:inline-block;">Sign out</a>
   </div>
   <div class="readout">
     <div class="cell"><div class="num" id="statPosts">—</div><div class="cap">Approved posts</div></div>
@@ -436,6 +472,14 @@
   </div>
 </div>
 
+<div class="panel" style="margin-top:20px;">
+  <p class="section-label">
+    <span class="dot"></span>Activity log
+    <span class="count" id="activityCount"></span>
+  </p>
+  <div id="activity"></div>
+</div>
+
 <script>
 const fmt = (n) => (n === null || n === undefined) ? "—" : Number(n).toLocaleString("uk-UA").replace(/\u00a0/g, " ");
 const campaignEl = document.getElementById("campaignId");
@@ -472,6 +516,7 @@ uploadForm.addEventListener("submit", async (e) => {
     }
     loadQueue();
     loadCreatorList();
+    loadActivity();
   } catch (err) {
     setStatus("Network error: " + err.message, "warn");
   }
@@ -530,9 +575,49 @@ function openBrandReport() {
   window.open(`/campaigns/${encodeURIComponent(campaignId)}/report.html`, "_blank");
 }
 
+const ACTION_LABEL = {
+  auto_approved: "auto ok",
+  flagged: "flagged",
+  approved: "approved",
+  rejected: "rejected",
+  edited: "edited",
+};
+
+function whenText(iso) {
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function loadActivity() {
+  const campaignId = campaignEl.value.trim();
+  const res = await fetch("/api/activity" + (campaignId ? "?campaignId=" + encodeURIComponent(campaignId) : ""));
+  const events = await res.json();
+  const el = document.getElementById("activity");
+  document.getElementById("activityCount").textContent = events.length ? events.length + " events" : "";
+  if (!events.length) {
+    el.innerHTML = '<div class="empty">Поки нічого не відбувалось.</div>';
+    return;
+  }
+  el.innerHTML = events
+    .map(
+      (e) => `
+      <div class="act-row">
+        <span class="act-when">${whenText(e.at)}</span>
+        <span class="act-tag ${e.action}">${ACTION_LABEL[e.action] || e.action}</span>
+        <span class="act-what">
+          <b>${e.creatorName}</b> · ${e.detail || ""}
+          <span class="act-who">${e.by ? " — " + e.by : ""}</span>
+        </span>
+      </div>`
+    )
+    .join("");
+}
+
 function applyFilters() {
   loadQueue();
   loadCreatorCard();
+  loadActivity();
 }
 
 async function loadQueue() {
@@ -582,10 +667,12 @@ async function loadQueue() {
 async function approve(id) {
   await fetch(`/api/queue/${id}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   loadQueue();
+  loadActivity();
 }
 async function reject(id) {
   await fetch(`/api/queue/${id}/reject`, { method: "POST" });
   loadQueue();
+  loadActivity();
 }
 
 async function loadReport() {
@@ -608,6 +695,7 @@ async function loadReport() {
 
 loadQueue();
 loadCreatorList();
+loadActivity();
 </script>
 </body>
 </html>

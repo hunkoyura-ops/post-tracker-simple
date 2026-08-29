@@ -1,4 +1,4 @@
-// Must come first: auth.js reads env vars at import time.
+// Must be first: auth.js reads env vars while it is being imported.
 import "dotenv/config";
 
 import express from "express";
@@ -33,7 +33,7 @@ import {
 const app = express();
 app.use(express.json());
 
-// ---- Public routes (must be reachable without a session) ----
+// ---- Public: reachable without signing in ----
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 app.get("/login", (req, res) => {
@@ -66,7 +66,7 @@ app.get("/auth/logout", (req, res) => {
   res.set("Set-Cookie", clearSessionCookie()).redirect("/login");
 });
 
-// ---- Everything below requires a session ----
+// ---- Everything below needs a session (when auth is switched on) ----
 app.use(requireAuth);
 
 app.use(express.static("public"));
