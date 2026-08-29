@@ -56,6 +56,7 @@ app.get("/auth/telegram", (req, res) => {
 app.get("/auth/telegram/callback", async (req, res) => {
   if (!AUTH_ENABLED) return res.redirect("/");
 
+  console.log("[auth] callback hit:", Object.keys(req.query).join(","));
   const sendError = (status, message) =>
     res
       .status(status)
