@@ -12,10 +12,12 @@ import { renderReportHtml } from "./report-template.js";
 import { validateMetrics } from "./validate.js";
 import {
   AUTH_ENABLED,
-  verifyTelegramAuth,
+  beginLogin,
+  completeLogin,
   isAllowed,
   makeSessionCookie,
   clearSessionCookie,
+  clearFlowCookie,
   requireAuth,
   renderLoginPage,
 } from "./auth.js";
@@ -31,6 +33,9 @@ import {
 } from "./db.js";
 
 const app = express();
+// Railway terminates TLS in front of the app; without this req.protocol
+// would be "http" and the redirect_uri sent to Telegram would not match.
+app.set("trust proxy", 1);
 app.use(express.json());
 
 // ---- Public: reachable without signing in ----
@@ -41,25 +46,41 @@ app.get("/login", (req, res) => {
   res.set("Content-Type", "text/html; charset=utf-8").send(renderLoginPage(null));
 });
 
+// Start: bounce the user to Telegram's consent screen.
 app.get("/auth/telegram", (req, res) => {
-  const user = verifyTelegramAuth(req.query);
-  if (!user) {
-    return res
-      .status(401)
+  if (!AUTH_ENABLED) return res.redirect("/");
+  beginLogin(req, res);
+});
+
+// Return: Telegram sends a code back here.
+app.get("/auth/telegram/callback", async (req, res) => {
+  if (!AUTH_ENABLED) return res.redirect("/");
+
+  const sendError = (status, message) =>
+    res
+      .status(status)
+      .set("Set-Cookie", clearFlowCookie())
       .set("Content-Type", "text/html; charset=utf-8")
-      .send(renderLoginPage("Не вдалося підтвердити вхід. Спробуйте ще раз."));
-  }
-  if (!isAllowed(user.id)) {
-    return res
-      .status(403)
-      .set("Content-Type", "text/html; charset=utf-8")
-      .send(
-        renderLoginPage(
-          `Немає доступу. Ваш Telegram ID: ${user.id} — попросіть додати його до списку.`
-        )
+      .send(renderLoginPage(message));
+
+  try {
+    const result = await completeLogin(req);
+    if (!result.ok) return sendError(401, `Вхід не вдався: ${result.reason}`);
+
+    if (!isAllowed(result.user.id)) {
+      return sendError(
+        403,
+        `Немає доступу. Ваш Telegram ID: ${result.user.id} — попросіть додати його до списку.`
       );
+    }
+
+    res
+      .set("Set-Cookie", [makeSessionCookie(result.user), clearFlowCookie()])
+      .redirect("/");
+  } catch (err) {
+    console.error("[auth]", err);
+    sendError(500, `Помилка входу: ${err.message}`);
   }
-  res.set("Set-Cookie", makeSessionCookie(user)).redirect("/");
 });
 
 app.get("/auth/logout", (req, res) => {
