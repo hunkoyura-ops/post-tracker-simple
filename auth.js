@@ -155,9 +155,15 @@ async function getJwks() {
 
 // ---- OIDC flow ------------------------------------------------------------
 
+// Telegram normalises registered Redirect URLs with a trailing slash, and the
+// comparison at their end is exact — so the value we send must carry it too.
+// TELEGRAM_REDIRECT_URI overrides this if your registered URL differs.
+const REDIRECT_URI_OVERRIDE = process.env.TELEGRAM_REDIRECT_URI || "";
+
 function redirectUri(req) {
-  if (APP_URL) return `${APP_URL}/auth/telegram/callback`;
-  return `${req.protocol}://${req.get("host")}/auth/telegram/callback`;
+  if (REDIRECT_URI_OVERRIDE) return REDIRECT_URI_OVERRIDE;
+  const base = APP_URL || `${req.protocol}://${req.get("host")}`;
+  return `${base}/auth/telegram/callback/`;
 }
 
 // Step 1: send the user to Telegram, remembering state + PKCE verifier.
