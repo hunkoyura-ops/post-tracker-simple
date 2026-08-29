@@ -1,26 +1,74 @@
+// Must come first: auth.js reads env vars at import time.
+import "dotenv/config";
+
 import express from "express";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import dotenv from "dotenv";
 
 import { extractMetrics, generateNarrative } from "./claude.js";
 import { renderReportHtml } from "./report-template.js";
 import { validateMetrics } from "./validate.js";
 import {
+  AUTH_ENABLED,
+  verifyTelegramAuth,
+  isAllowed,
+  makeSessionCookie,
+  clearSessionCookie,
+  requireAuth,
+  renderLoginPage,
+} from "./auth.js";
+import {
   insertPost,
-  updatePost,
+  updatePostWithEvent,
+  getActivity,
   getQueue,
   getApprovedForCampaign,
   getCreators,
   getApprovedForCreator,
+  getPost,
 } from "./db.js";
-
-dotenv.config();
 
 const app = express();
 app.use(express.json());
+
+// ---- Public routes (must be reachable without a session) ----
+app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+app.get("/login", (req, res) => {
+  if (!AUTH_ENABLED) return res.redirect("/");
+  res.set("Content-Type", "text/html; charset=utf-8").send(renderLoginPage(null));
+});
+
+app.get("/auth/telegram", (req, res) => {
+  const user = verifyTelegramAuth(req.query);
+  if (!user) {
+    return res
+      .status(401)
+      .set("Content-Type", "text/html; charset=utf-8")
+      .send(renderLoginPage("Не вдалося підтвердити вхід. Спробуйте ще раз."));
+  }
+  if (!isAllowed(user.id)) {
+    return res
+      .status(403)
+      .set("Content-Type", "text/html; charset=utf-8")
+      .send(
+        renderLoginPage(
+          `Немає доступу. Ваш Telegram ID: ${user.id} — попросіть додати його до списку.`
+        )
+      );
+  }
+  res.set("Set-Cookie", makeSessionCookie(user)).redirect("/");
+});
+
+app.get("/auth/logout", (req, res) => {
+  res.set("Set-Cookie", clearSessionCookie()).redirect("/login");
+});
+
+// ---- Everything below requires a session ----
+app.use(requireAuth);
+
 app.use(express.static("public"));
 
 const DATA_DIR = process.env.DATA_DIR || process.cwd();
@@ -55,6 +103,17 @@ app.post("/api/submit", upload.single("screenshot"), async (req, res) => {
       flags,
       status: flags.length === 0 ? "approved" : "pending_review",
       createdAt: new Date().toISOString(),
+      history: [
+        {
+          at: new Date().toISOString(),
+          action: flags.length === 0 ? "auto_approved" : "flagged",
+          by: actorOf(req),
+          detail:
+            flags.length === 0
+              ? "Метрики зчитано, перевірку пройдено"
+              : `Зчитано, але позначено: ${flags.join("; ")}`,
+        },
+      ],
     };
 
     insertPost(post);
@@ -69,17 +128,76 @@ app.get("/api/queue", (req, res) => {
   res.json(getQueue(req.query.campaignId, req.query.creatorId));
 });
 
+// Who performed the action. Fills in automatically once Telegram sign-in
+// is enabled; until then actions are logged without a name.
+function actorOf(req) {
+  if (!req.user) return null;
+  return req.user.username ? "@" + req.user.username : String(req.user.id);
+}
+
+const METRIC_FIELDS = ["views", "reach", "impressions", "likes", "comments", "shares", "saves"];
+
 app.post("/api/queue/:id/approve", (req, res) => {
-  const updates = { status: "approved", ...req.body };
-  const post = updatePost(req.params.id, updates);
-  if (!post) return res.status(404).json({ error: "Не знайдено" });
+  const existing = getPost(req.params.id);
+  if (!existing) return res.status(404).json({ error: "Не знайдено" });
+
+  // Anything in the body that differs from the stored value is a manual fix.
+  const corrections = {};
+  const changes = [];
+  for (const field of METRIC_FIELDS) {
+    if (!(field in req.body)) continue;
+    const next = req.body[field] === null || req.body[field] === "" ? null : Number(req.body[field]);
+    if (next !== existing[field]) {
+      corrections[field] = next;
+      changes.push(`${field}: ${existing[field] ?? "—"} → ${next ?? "—"}`);
+    }
+  }
+
+  const now = new Date().toISOString();
+  const by = actorOf(req);
+
+  if (changes.length) {
+    updatePostWithEvent(req.params.id, corrections, {
+      at: now,
+      action: "edited",
+      by,
+      detail: "Виправлено вручну — " + changes.join(", "),
+    });
+  }
+
+  const post = updatePostWithEvent(
+    req.params.id,
+    { status: "approved" },
+    { at: now, action: "approved", by, detail: "Підтверджено після перевірки" }
+  );
   res.json(post);
 });
 
 app.post("/api/queue/:id/reject", (req, res) => {
-  const post = updatePost(req.params.id, { status: "rejected" });
+  const post = updatePostWithEvent(
+    req.params.id,
+    { status: "rejected" },
+    {
+      at: new Date().toISOString(),
+      action: "rejected",
+      by: actorOf(req),
+      detail: req.body?.reason ? String(req.body.reason).slice(0, 200) : "Відхилено",
+    }
+  );
   if (!post) return res.status(404).json({ error: "Не знайдено" });
   res.json(post);
+});
+
+// Recent activity across a campaign — who did what, newest first.
+app.get("/api/activity", (req, res) => {
+  res.json(getActivity(req.query.campaignId, Number(req.query.limit) || 60));
+});
+
+// Full history for one post.
+app.get("/api/posts/:id/history", (req, res) => {
+  const post = getPost(req.params.id);
+  if (!post) return res.status(404).json({ error: "Не знайдено" });
+  res.json({ postId: post.id, creatorName: post.creatorName, history: post.history || [] });
 });
 
 // List of creators seen so far — powers the filter dropdown.
@@ -186,8 +304,6 @@ app.get("/campaigns/:campaignId/report.html", async (req, res) => {
       .send(`<p style="font-family:monospace">Report error: ${err.message}</p>`);
   }
 });
-
-app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
