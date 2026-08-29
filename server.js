@@ -210,6 +210,21 @@ app.post("/api/queue/:id/reject", (req, res) => {
   res.json(post);
 });
 
+// Who is signed in right now. Returns nulls when auth is switched off.
+app.get("/api/me", (req, res) => {
+  if (!AUTH_ENABLED) return res.json({ authEnabled: false, user: null });
+  res.json({
+    authEnabled: true,
+    user: req.user
+      ? {
+          id: req.user.id,
+          username: req.user.username || null,
+          name: req.user.name || null,
+        }
+      : null,
+  });
+});
+
 // Recent activity across a campaign — who did what, newest first.
 app.get("/api/activity", (req, res) => {
   res.json(getActivity(req.query.campaignId, Number(req.query.limit) || 60));

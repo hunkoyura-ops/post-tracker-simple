@@ -84,6 +84,25 @@
   }
   .campaign-bar .controls input { flex: 1; min-width: 180px; }
 
+  .whoami {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.04em;
+    display: none;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+  }
+  .whoami::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--teal);
+    flex-shrink: 0;
+  }
+  .whoami.on { display: inline-flex; }
+
   .readout {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -411,7 +430,8 @@
     <button class="btn tiny" onclick="loadReport()">Load report</button>
     <button class="btn ghost tiny" onclick="openBrandReport()">Brand report ↗</button>
     <button class="btn ghost tiny" onclick="applyFilters()">Apply</button>
-    <a href="/auth/logout" class="btn ghost tiny" style="text-decoration:none;display:inline-block;">Sign out</a>
+    <span id="whoami" class="whoami"></span>
+    <a href="/auth/logout" class="btn ghost tiny" id="signOut" style="text-decoration:none;display:none;">Sign out</a>
   </div>
   <div class="readout">
     <div class="cell"><div class="num" id="statPosts">—</div><div class="cap">Approved posts</div></div>
@@ -614,6 +634,32 @@ async function loadActivity() {
     .join("");
 }
 
+async function loadWhoAmI() {
+  try {
+    const res = await fetch("/api/me");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.authEnabled || !data.user) return;
+
+    const label = data.user.username
+      ? "@" + data.user.username
+      : data.user.name || data.user.id;
+
+    const el = document.getElementById("whoami");
+    el.textContent = label;
+    el.classList.add("on");
+    document.getElementById("signOut").style.display = "inline-block";
+
+    // Greet once per browser session, not on every page load.
+    if (!sessionStorage.getItem("greeted")) {
+      sessionStorage.setItem("greeted", "1");
+      setStatus(`Вхід виконано — ${data.user.name || label}`, "ok");
+    }
+  } catch {
+    // Signed-in state is cosmetic; failing to load it shouldn't break the page.
+  }
+}
+
 function applyFilters() {
   loadQueue();
   loadCreatorCard();
@@ -696,6 +742,7 @@ async function loadReport() {
 loadQueue();
 loadCreatorList();
 loadActivity();
+loadWhoAmI();
 </script>
 </body>
 </html>
