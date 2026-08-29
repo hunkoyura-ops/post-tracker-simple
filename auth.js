@@ -274,7 +274,7 @@ function isAllowed(userId) {
 
 function makeSessionCookie(user) {
   const exp = Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400;
-  const value = packCookie({ id: user.id, username: user.username, exp });
+  const value = packCookie({ id: user.id, username: user.username, name: user.name, exp });
   return `${COOKIE_NAME}=${value}; HttpOnly; Path=/; Max-Age=${SESSION_DAYS * 86400}; SameSite=Lax; Secure`;
 }
 
