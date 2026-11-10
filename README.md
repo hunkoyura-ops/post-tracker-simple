@@ -1,7 +1,34 @@
-"Post → Report" — власний веб-інструмент для збору й перевірки результатів інфлюенс-кампаній. На вході — скриншот статистики поста від криейтора; на виході — розпізнані метрики (перегляди, охоплення, лайки, коментарі, шери, збереження), зведення по кампанії й короткий текстовий висновок для бренду. Замість ручного переписування цифр у таблицю — завантаження скріна й автоматичне зчитування.
+# Post → Report
 
-Ключова частина — шар валідації: усе, що виглядає фізично неможливим (лайків більше ніж переглядів, ER понад 100%, охоплення в 20+ разів більше за базу підписників), автоматично відкладається в чергу на ручний контроль із поясненням, що саме викликало сумнів. Чисті записи проходять одразу. Так помилка розпізнавання не потрапляє у звіт для бренду непоміченою.
+A web tool I built to collect and verify the results of influencer campaigns.
 
-Два зрізи даних: по кампанії — сумарні перегляди, охоплення, середній ER і висновок від AI (топ-перформери, аномалії, рекомендації); по криейтору — профіль за всі кампанії разом, з історією кожного поста та його ER, щоб бачити, хто стабільно спрацьовує, а не лише результат разової колаборації.
+The input is a creator's screenshot of post statistics. The output is the recognized metrics (views, reach, likes, comments, shares, saves), a campaign summary and a short written conclusion for the brand. Instead of retyping numbers into a spreadsheet, you upload the screenshot and the tool reads it.
 
-Працює на власному бекенді (Node.js + Claude Vision API) з постійним сховищем для скриншотів і даних. Профіль криейтора рахується локальною арифметикою без звернення до AI — тому відкривається миттєво й не витрачає API-квоту.
+## Validation layer
+
+This is the key part. Anything that looks physically impossible is automatically held in a manual review queue, with an explanation of what raised the doubt:
+
+- more likes than views
+- engagement rate above 100%
+- reach more than 20 times the follower count
+
+Clean records pass straight through. A recognition error cannot slip into a brand report unnoticed.
+
+## Two views of the data
+
+- **By campaign**: total views, reach, average engagement rate and an AI-written conclusion (top performers, anomalies, recommendations).
+- **By creator**: a profile across all campaigns, with the history of each post and its engagement rate. It shows who performs consistently, not just the result of a single collaboration.
+
+## How it works
+
+The tool runs on its own backend (Node.js + Claude Vision API) with persistent storage for screenshots and data. The creator profile is calculated with local arithmetic and no AI call, so it opens instantly and uses no API quota.
+
+## Stack
+
+- Node.js, Express
+- Anthropic Claude Vision API
+- Railway
+
+## Author
+
+Yurii Hunko, [hunkoyura.com](https://hunkoyura.com)
